@@ -48,7 +48,7 @@ class ReaperOSC:
 
 class TrackTalk:
     TRACK_MAP = {
-        "rhythm_left":3,"rhythm left":3,"rhythm_right":4,"rhythm right":4,
+        "rhythm":3,"rhythm_left":3,"rhythm left":3,"rhythm_right":4,"rhythm right":4,
         "lead":5,"lead guitar":5,"bass":6,"drums":8,
         "vocals":7,"vocal":7,"master":0,
     }
@@ -65,11 +65,53 @@ class TrackTalk:
 
     def __init__(self, port=8000): self.reaper = ReaperOSC(port=port)
 
+    def _tokens(self, text):
+        return text.lower().split()
+
+    def _kw_matches(self, tokens, kw):
+        """Token-order match: keyword tokens must appear in order in text tokens."""
+        ktoks = kw.split("|")[0].split()
+        if not ktoks:
+            return False
+        ti = 0
+        for kt in ktoks:
+            found = False
+            while ti < len(tokens):
+                if tokens[ti] == kt:
+                    found = True
+                    ti += 1
+                    break
+                ti += 1
+            if not found:
+                return False
+        return True
+
+    def _parse_volume_delta(self, text):
+        """Match '+2dB' or '-3 dB' style relative volume changes."""
+        m = re.search(r"([+-])\s*(\d+(?:\.\d+)?)\s*dB?", text)
+        if m:
+            sign = 1 if m.group(1) == "+" else -1
+            return sign * float(m.group(2))
+        return None
+
     def parse(self, text):
         text = text.lower().strip()
+        # Volume delta commands (+2dB, -3 dB) take priority over keyword matching
+        delta = self._parse_volume_delta(text)
+        if delta is not None:
+            # Extract target from text for the delta command
+            target = None
+            for tn in self.TRACK_MAP:
+                if tn in text: target = tn; break
+            action = "gain_up" if delta > 0 else "gain_down"
+            return {"action":action,"target":target,"param":abs(delta),"raw":text}
+        tokens = self._tokens(text)
         for keys, (action, aid) in self.KEYWORDS.items():
             for kw in keys.split("|"):
-                if kw in text:
+                kw_clean = kw.strip()
+                if not kw_clean:
+                    continue
+                if self._kw_matches(tokens, kw_clean):
                     target = None
                     for tn in self.TRACK_MAP:
                         if tn in text: target = tn; break
